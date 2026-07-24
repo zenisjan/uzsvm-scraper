@@ -34,6 +34,36 @@ API_ATTACHMENT = f"{BASE_URL}/api/Property/Attachment"
 DETAIL_URL = f"{BASE_URL}/Home/AuctionDetail"
 
 
+class _FailRunOnCrash:
+    """Marks the actor_runs row 'failed' if the run dies with an unhandled error.
+
+    Historically a terminal status was written only on the happy path, so a crash
+    (or an Apify hard-timeout kill) left the row 'running' forever and the web app
+    could not tell a dead run from a live one — sold-detection then mistreated the
+    run's listings. Used as `async with Actor, _FailRunOnCrash():` so it exits
+    before Actor; the exception still propagates and fails the platform run too.
+    """
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if exc_type is not None:
+            try:
+                # db_manager is only imported inside main() in this scraper, so
+                # resolve it lazily here as well.
+                try:
+                    from .database import db_manager
+                except ImportError:
+                    from database import db_manager
+                Actor.log.error(f"Run failed with unhandled error: {exc!r}")
+                db_manager.update_actor_run_status("failed", 0)
+                db_manager.close_pool()
+            except Exception as finalize_error:
+                Actor.log.error(f"Could not mark run failed: {finalize_error}")
+        return False
+
+
 class NabidkaMajetkuScraper:
     """Scraper for nabidkamajetku.gov.cz using the site's JSON API."""
 
@@ -342,7 +372,7 @@ class NabidkaMajetkuScraper:
 
 async def main():
     """Main function to run the scraper."""
-    async with Actor:
+    async with Actor, _FailRunOnCrash():
         Actor.log.info("Starting Nabidka Majetku Scraper (nabidkamajetku.gov.cz)")
         Actor.log.info("=" * 60)
 
@@ -476,10 +506,16 @@ async def main():
             else:
                 Actor.log.warning("No auctions found matching the specified criteria")
 
+            # Zero auctions almost always means upstream breakage (API change,
+            # auth/session failure) rather than an empty market — mark the run
+            # 'failed' so sold-detection ignores it instead of flagging every
+            # previously-seen listing as sold.
+            run_status = "completed" if all_auctions else "failed"
+
             # Update actor run status
             if db_manager_available:
                 try:
-                    db_manager.update_actor_run_status("completed", len(all_auctions))
+                    db_manager.update_actor_run_status(run_status, len(all_auctions))
                     Actor.log.info("Updated actor run status in database")
                 except Exception as e:
                     Actor.log.error(f"Failed to update actor run status: {e}")
