@@ -34,6 +34,37 @@ API_ATTACHMENT = f"{BASE_URL}/api/Property/Attachment"
 DETAIL_URL = f"{BASE_URL}/Home/AuctionDetail"
 
 
+# Bounded exponential backoff for transient fetch failures (timeouts, resets,
+# 429/5xx). A single flaky response used to abort an entire category scrape.
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+async def _request_with_retry(client, method, url, attempts=3, **kwargs):
+    """Issue a request, retrying transient failures with exponential backoff.
+
+    Returns the final response without raising for status (callers keep their
+    own raise_for_status()); re-raises the last transport error if the
+    connection itself keeps failing.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            response = await client.request(method, url, **kwargs)
+        except httpx.TransportError as e:
+            if attempt == attempts:
+                raise
+            reason = repr(e)
+        else:
+            if response.status_code not in _RETRYABLE_STATUS or attempt == attempts:
+                return response
+            reason = f"HTTP {response.status_code}"
+        delay = 2.0 * (2 ** (attempt - 1))
+        Actor.log.warning(
+            f"Transient fetch failure ({reason}); retry {attempt}/{attempts - 1} "
+            f"in {delay:.0f}s: {url}"
+        )
+        await asyncio.sleep(delay)
+
+
 class _FailRunOnCrash:
     """Marks the actor_runs row 'failed' if the run dies with an unhandled error.
 
@@ -167,7 +198,9 @@ class NabidkaMajetkuScraper:
             }
 
             try:
-                response = await self.client.post(
+                response = await _request_with_retry(
+                    self.client,
+                    "POST",
                     API_AUCTION_LIST,
                     json=body,
                     timeout=60.0,
