@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+apify_storage/
+storage/
+node_modules/
+.DS_Store
+.vscode/
+.idea/
+.claude/
+.playwright-mcp/

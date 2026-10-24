@@ -1,0 +1,69 @@
+{
+    "title": "Nabídka Majetku Scraper (ÚZSVM)",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "maxListings": {
+            "title": "Maximum listings to scrape",
+            "type": "integer",
+            "description": "Maximum number of listings to scrape (0 = all available). The API is paginated, so this limits total results.",
+            "minimum": 0,
+            "default": 0
+        },
+        "auctionStatus": {
+            "title": "Auction status filter",
+            "type": "string",
+            "description": "Filter auctions by status.",
+            "editor": "select",
+            "enum": [
+                "all",
+                "active",
+                "closed",
+                "prepared",
+                "canceled"
+            ],
+            "enumTitles": [
+                "All Statuses",
+                "Active Auctions Only",
+                "Closed Auctions Only",
+                "Prepared Auctions Only",
+                "Canceled Auctions Only"
+            ],
+            "default": "active"
+        },
+        "priceMin": {
+            "title": "Minimum price filter (CZK)",
+            "type": "integer",
+            "description": "Minimum price filter in Czech Koruna. Applied after fetching data from API.",
+            "minimum": 0,
+            "default": 0
+        },
+        "priceMax": {
+            "title": "Maximum price filter (CZK)",
+            "type": "integer",
+            "description": "Maximum price filter in Czech Koruna. Applied after fetching data from API.",
+            "minimum": 0,
+            "default": 0
+        },
+        "location": {
+            "title": "Location filter",
+            "type": "string",
+            "description": "Optional location filter (district name). Applied after fetching data from API.",
+            "editor": "textfield"
+        },
+        "searchQuery": {
+            "title": "Search query filter",
+            "type": "string",
+            "description": "Optional search term to filter auction titles/descriptions. Applied after fetching data from API.",
+            "editor": "textfield"
+        },
+        "categoryId": {
+            "title": "Category ID filter",
+            "type": "integer",
+            "description": "Category filter (0 = all). Common: Pozemky, Stavby, etc.",
+            "minimum": 0,
+            "default": 0
+        }
+    },
+    "required": []
+}

@@ -436,6 +436,15 @@ async def main():
             scraper_name = os.environ.get("SCRAPER_NAME", "nabidka_majetku")
             db_manager.scraper_name = scraper_name
 
+            # database.py falls back to localhost when DB_HOST is unset, which only
+            # ever works on a dev machine. On the platform that means the Actor
+            # version has no DB_* environment variables (env vars are per version).
+            if Actor.is_at_home() and not os.environ.get("DB_HOST"):
+                raise RuntimeError(
+                    "DB_HOST is not set: add the DB_* environment variables to the "
+                    "Actor version this build belongs to"
+                )
+
             db_manager.initialize_pool()
 
             # Create actor run record
@@ -460,6 +469,12 @@ async def main():
 
         except Exception as e:
             Actor.log.error(f"Failed to initialize database: {e}")
+            if Actor.is_at_home():
+                # The database is the point of a platform run: without it nothing
+                # reaches the map. Carrying on made the Apify run "succeed" while its
+                # actor_runs row sat in READY until the janitor swept it 6 h later,
+                # which hid a missing-env-vars deploy for three months. Fail loudly.
+                raise
             Actor.log.warning(
                 "Continuing without database integration - data will be stored in Apify dataset only"
             )
