@@ -63,6 +63,18 @@
             "description": "Category filter (0 = all). Common: Pozemky, Stavby, etc.",
             "minimum": 0,
             "default": 0
+        },
+        "includeTenders": {
+            "title": "Include other forms of sale and lease",
+            "type": "boolean",
+            "description": "Also scrape the site's \"Jiné formy prodeje a pronájmu\" offers (sale, gift, lease). Their ids are stored with a \"T\" prefix. maxListings counts auctions first, then tenders.",
+            "default": true
+        },
+        "includeDetailedData": {
+            "title": "Fetch detail pages",
+            "type": "boolean",
+            "description": "Open every item's detail page for exact GPS (real-estate auctions), the contact person, phone and e-mail, all photos and the auction facts (minimum bid, deposit, registration deadline). A failed detail page keeps the list data.",
+            "default": true
         }
     },
     "required": []
