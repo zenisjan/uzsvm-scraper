@@ -100,6 +100,9 @@ class NabidkaMajetkuScraper:
 
     def __init__(self, client: httpx.AsyncClient):
         self.client = client
+        # Why this run is incomplete (a page or the conversion failed); main() marks
+        # such a run 'failed' instead of 'completed'.
+        self.incomplete_reasons: List[str] = []
 
     async def scrape_all_auctions(
         self,
@@ -164,6 +167,7 @@ class NabidkaMajetkuScraper:
 
         except Exception as e:
             Actor.log.error(f"Error in scrape_all_auctions: {e}")
+            self.incomplete_reasons.append(f"scrape_all_auctions: {e!r}")
             return []
 
     async def _fetch_all_pages(
@@ -210,6 +214,9 @@ class NabidkaMajetkuScraper:
                     Actor.log.error(
                         f"API returned {response.status_code}: {response.text[:500]}"
                     )
+                    self.incomplete_reasons.append(
+                        f"auction list page {page}: HTTP {response.status_code}"
+                    )
                     break
 
                 data = response.json()
@@ -217,6 +224,11 @@ class NabidkaMajetkuScraper:
                 total_count = data.get("PropertyTotalCount", 0)
 
                 if not auctions:
+                    if len(all_auctions) < total_count:
+                        self.incomplete_reasons.append(
+                            f"auction list page {page} came back empty at "
+                            f"{len(all_auctions)}/{total_count}"
+                        )
                     break
 
                 all_auctions.extend(auctions)
@@ -240,6 +252,7 @@ class NabidkaMajetkuScraper:
 
             except Exception as e:
                 Actor.log.error(f"Failed to fetch page {page}: {e}")
+                self.incomplete_reasons.append(f"auction list page {page}: {e!r}")
                 break
 
         return all_auctions
@@ -506,6 +519,9 @@ async def main():
                 category_id=category_id,
             )
 
+            incomplete_reasons = list(scraper.incomplete_reasons)
+            saved = 0  # rows actually inserted into the database
+
             # Save data to both Apify dataset and database
             if all_auctions:
                 await Actor.push_data(all_auctions)
@@ -525,6 +541,7 @@ async def main():
                         if db_auctions:
                             Actor.log.info("Saving active auctions to database...")
                             db_manager.insert_listings(db_auctions)
+                            saved = len(db_auctions)
                             Actor.log.info(
                                 f"Saved {len(db_auctions)} active listings to database"
                             )
@@ -544,6 +561,7 @@ async def main():
                             ]
                             if db_auctions:
                                 db_manager.insert_listings(db_auctions)
+                                saved = len(db_auctions)
                                 Actor.log.info(
                                     f"Saved {len(db_auctions)} active listings after retry"
                                 )
@@ -551,22 +569,34 @@ async def main():
                             Actor.log.error(
                                 f"Failed to save listings even after retry: {retry_e}"
                             )
+                            incomplete_reasons.append(f"database insert failed: {retry_e!r}")
             else:
                 Actor.log.warning("No auctions found matching the specified criteria")
 
             # Zero auctions almost always means upstream breakage (API change,
             # auth/session failure) rather than an empty market — mark the run
             # 'failed' so sold-detection ignores it instead of flagging every
-            # previously-seen listing as sold.
-            run_status = "completed" if all_auctions else "failed"
+            # previously-seen listing as sold. The same goes for a run that stopped
+            # early (a page failed, the insert failed): sold-detection would flag
+            # everything it didn't reach as sold.
+            run_status = "completed" if all_auctions and not incomplete_reasons else "failed"
+            for reason in incomplete_reasons:
+                Actor.log.error(f"Run incomplete — {reason}")
 
             # Update actor run status
             if db_manager_available:
                 try:
-                    db_manager.update_actor_run_status(run_status, len(all_auctions))
+                    db_manager.update_actor_run_status(run_status, saved)
                     Actor.log.info("Updated actor run status in database")
                 except Exception as e:
                     Actor.log.error(f"Failed to update actor run status: {e}")
+
+            if incomplete_reasons:
+                more = f" (+{len(incomplete_reasons) - 1} more)" if len(incomplete_reasons) > 1 else ""
+                try:
+                    await Actor.set_status_message(f"Stopped early: {incomplete_reasons[0]}{more}")
+                except Exception as e:
+                    Actor.log.warning(f"Could not set the run's status message: {e}")
 
             # Final summary
             Actor.log.info("=" * 60)
